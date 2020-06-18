@@ -25,6 +25,7 @@ command_strings = [
     "translate",
     "reconstruct_sequences",
     "clades",
+    "clades_resolve",
     "traits",
     "sequence_traits",
     "lbi",
@@ -72,6 +73,7 @@ def run(argv):
     args = make_parser().parse_args(argv)
     try:
         return args.__command__.run(args)
+
     except RecursionError:
         print("FATAL: Maximum recursion depth reached. You can set the env variable AUGUR_RECURSION_LIMIT to adjust this (current limit: {})".format(sys.getrecursionlimit()))
         sys.exit(2)
