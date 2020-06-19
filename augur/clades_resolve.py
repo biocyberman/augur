@@ -73,7 +73,7 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
                     node.sequences[gene][pos] = d
 
     updated_nodes = []
-
+    new_clades = {}
     def _resolve_child_clade(clade_name, clade_alleles, subtree, clade_level):
         if clade_level <= 6:
             for node in subtree:
@@ -82,19 +82,21 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
                 mut_str = ','.join(muts)
                 cl_name = clade_name
                 if len(muts) >= diff and node.leaf_count >= support:
-                    if node not in basal_nodes:
-                        cl_name = cl_name + '/' + mut_str
-                    if clade_level > 2:
-                        print(f"Clade: {cl_name}, level: {clade_level}, support: {node.leaf_count}")
-                    if node.name not in updated_nodes:
-                        clade_membership[node.name] = {'clade_annotation': cl_name, 'clade_membership': cl_name}
-                        updated_nodes.append(node.name)
-
                     alleles = []
                     for mut in all_muts[node.name]['muts']:
                         a, pos, d = mut[0], int(mut[1:-1]) - 1, mut[-1]
                         allele = ('nuc', pos, d)
                         alleles.append(allele)
+                    if node not in basal_nodes:
+                        cl_name = cl_name + '/' + mut_str
+                    if clade_level > 2:
+                        print(f"Clade: {cl_name}, level: {clade_level}, support: {node.leaf_count}")
+                    if node.name not in updated_nodes and is_node_in_clade(clade_alleles, node, ref):
+                        clade_membership[node.name] = {'clade_annotation': cl_name, 'clade_membership': cl_name}
+                        new_clades[cl_name] = alleles
+                        updated_nodes.append(node.name)
+
+
                     clade_level += 1
                     _resolve_child_clade(cl_name, alleles, node, clade_level)
                 else:
@@ -137,7 +139,7 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
             if child.name in clade_membership and 'clade_annotation' not in clade_membership[child.name]:
                 clade_membership[child.name]['clade_membership'] = clade_membership[node.name]['clade_membership']
 
-    return clade_membership
+    return clade_membership, new_clades
 
 
 def register_arguments(parser):
@@ -146,7 +148,8 @@ def register_arguments(parser):
                         help='JSON(s) containing ancestral and tip nucleotide and/or amino-acid mutations ')
     parser.add_argument('--reference', nargs='+',
                         help='fasta files containing reference and tip nucleotide and/or amino-acid sequences ')
-    parser.add_argument('--clades', type=str, help='TSV file containing clade definitions by amino-acid')
+    parser.add_argument('--clades', type=str, help='TSV file containing clade definitions')
+    parser.add_argument('--new-clades', type=str, help='Write out TSV file containing new clades')
     parser.add_argument('--min-support', type=int, default=10,
                         help='Mininum number of sequences to form a new sub-clade (default: 10)')
     parser.add_argument('--min-mutation', type=int, default= 1,
@@ -177,8 +180,14 @@ def run(args):
     min_mutation = args.min_mutation
     clade_designations = read_in_clade_definitions(args.clades)
 
-    clade_membership = resolve_clades(clade_designations, all_muts, tree, ref, support=min_support, diff= min_mutation)
-
+    clade_membership, new_clades = resolve_clades(clade_designations, all_muts, tree, ref, support=min_support, diff= min_mutation)
+    if args.new_clades:
+        clade_out = open(args.new_clades, 'w')
+        for clade, alleles in new_clades.items():
+            for allele in alleles:
+                clade_out.write(f'{clade}\t{allele[0]}\t{allele[1]+1}\t{allele[2]}\n')
+        print(f"Wrote new clades to: {args.new_clades}")
+        clade_out.close()
     out_name = get_json_name(args)
     write_json({'nodes': clade_membership}, out_name)
     print("clades written to", out_name, file=sys.stdout)
