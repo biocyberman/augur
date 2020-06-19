@@ -12,7 +12,7 @@ from augur.clades import is_node_in_clade, read_in_clade_definitions, get_refere
 import argparse
 
 
-def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, diff=1):
+def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, diff=1, depth = 5):
     '''
 
     Ensures all nodes have an entry (or auspice doesn't display nicely), tests each node
@@ -74,8 +74,8 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
 
     updated_nodes = []
     new_clades = {}
-    def _resolve_child_clade(clade_name, clade_alleles, subtree, clade_level):
-        if clade_level <= 6:
+    def _resolve_child_clade(clade_name, clade_alleles, subtree, clade_level, depth = depth):
+        if clade_level <= depth:
             for node in subtree:
                 # if is_node_in_clade(clade_alleles, node, ref):
                 muts = all_muts[node.name]['muts']
@@ -150,6 +150,8 @@ def register_arguments(parser):
                         help='fasta files containing reference and tip nucleotide and/or amino-acid sequences ')
     parser.add_argument('--clades', type=str, help='TSV file containing clade definitions')
     parser.add_argument('--new-clades', type=str, help='Write out TSV file containing new clades')
+    parser.add_argument('--max-depth', type=int, default= 5,
+                        help='Maximum depth to search for sub-clades from base clade (default: 5)')
     parser.add_argument('--min-support', type=int, default=10,
                         help='Mininum number of sequences to form a new sub-clade (default: 10)')
     parser.add_argument('--min-mutation', type=int, default= 1,
@@ -180,7 +182,8 @@ def run(args):
     min_mutation = args.min_mutation
     clade_designations = read_in_clade_definitions(args.clades)
 
-    clade_membership, new_clades = resolve_clades(clade_designations, all_muts, tree, ref, support=min_support, diff= min_mutation)
+    clade_membership, new_clades = resolve_clades(clade_designations, all_muts, tree, ref,
+                                                  support=min_support, diff= min_mutation, depth = args.max_depth)
     if args.new_clades:
         clade_out = open(args.new_clades, 'w')
         for clade, alleles in new_clades.items():
