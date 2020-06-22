@@ -35,6 +35,7 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
     -------
     dict
         mapping of node to clades
+    TODO: Add option to incorporate manual SNP table from extract_SNPs.py
     '''
 
     clade_membership = {}
@@ -87,11 +88,12 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
                         a, pos, d = mut[0], int(mut[1:-1]) - 1, mut[-1]
                         allele = ('nuc', pos, d)
                         alleles.append(allele)
-                    if node not in basal_nodes:
+                    if node.name not in updated_nodes and\
+                            is_node_in_clade(alleles, node, ref) and\
+                            node not in basal_nodes:
                         cl_name = cl_name + '/' + mut_str
-                    if clade_level > 2:
-                        print(f"Clade: {cl_name}, level: {clade_level}, support: {node.leaf_count}")
-                    if node.name not in updated_nodes and is_node_in_clade(clade_alleles, node, ref):
+                        ## if clade_level > 0:
+                        print(f"New clade: {cl_name}, level: {clade_level}, support: {node.leaf_count}")
                         clade_membership[node.name] = {'clade_annotation': cl_name, 'clade_membership': cl_name}
                         new_clades[cl_name] = alleles
                         updated_nodes.append(node.name)
@@ -157,7 +159,6 @@ def register_arguments(parser):
     parser.add_argument('--min-mutation', type=int, default= 1,
                         help='Minimum number of mutations compare to the most recent ancestral sequence to form a new clade, (default: 1)')
     parser.add_argument('--output-node-data', type=str, help='name of JSON file to save clade assignments to')
-
 
 def run(args):
     ## read tree and data, if reading data fails, return with error code
