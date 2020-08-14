@@ -5,6 +5,9 @@ Augur consists of a number of tools that allow the user to filter and align sequ
 The different tools are meant to be composable and the output of one tool will serve as the input of other tools.
 We will work off the tutorial for Zika virus on the [nextstrain web site](https://nextstrain.org/docs/getting-started/zika-tutorial) and the github repository [nextstrain/zika-tutorial](https://github.com/nextstrain/zika-tutorial).
 
+## Setup
+
+To run this tutorial you'll need to [install augur](../installation/installation) and [install Snakemake](https://snakemake.readthedocs.io/en/stable/getting_started/installation.html).
 
 ## Augur commands
 
@@ -79,7 +82,7 @@ This rule would produce `results/filtered.fasta` from the input files `data/sequ
 Note that we explicitly specify what is an input and what is an output file.
 To filter our data, we would now call snakemake as
 ```bash
-snakemake results/filtered.fasta
+snakemake --cores 1 results/filtered.fasta
 ```
 and snakemake will run the same command as specified above.
 
@@ -102,7 +105,7 @@ rule align:
 ```
 If you now want to generate the alignment, you can type
 ```bash
-snakemake results/aligned.fasta
+snakemake --cores 1 results/aligned.fasta
 ```
 and snakemake will
 

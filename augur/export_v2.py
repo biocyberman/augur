@@ -734,8 +734,8 @@ def register_arguments_v2(subparsers):
     optional_inputs = v2.add_argument_group(
         title="OPTIONAL INPUT FILES"
     )
-    optional_inputs.add_argument('--metadata', metavar="TSV", help="Additional metadata for strains in the tree")
-    optional_inputs.add_argument('--colors', metavar="TSV", help="Custom color definitions")
+    optional_inputs.add_argument('--metadata', metavar="FILE", help="Additional metadata for strains in the tree, as CSV or TSV")
+    optional_inputs.add_argument('--colors', metavar="FILE", help="Custom color definitions, one per line in the format `TRAIT_TYPE\\tTRAIT_VALUE\\tHEX_CODE`")
     optional_inputs.add_argument('--lat-longs', metavar="TSV", help="Latitudes and longitudes for geography traits (overrides built in mappings)")
 
     optional_settings = v2.add_argument_group(
@@ -827,7 +827,10 @@ def set_description(data_json, cmd_line_description_file):
 
 def parse_node_data_and_metadata(T, node_data_files, metadata_file):
     node_data = read_node_data(node_data_files) # node_data_files is an array of multiple files (or a single file)
-    metadata, _ = read_metadata(metadata_file) # metadata={} if file isn't read / doeesn't exist
+    if metadata_file is not None:
+        metadata, _ = read_metadata(metadata_file)
+    else:
+        metadata = {}
     node_data_names = set()
     metadata_names = set()
 
@@ -875,7 +878,11 @@ def run_v2(args):
 
     # parse input files
     T = Phylo.read(args.tree, 'newick')
-    node_data, node_attrs, node_data_names, metadata_names = parse_node_data_and_metadata(T, args.node_data, args.metadata)
+    try:
+        node_data, node_attrs, node_data_names, metadata_names = parse_node_data_and_metadata(T, args.node_data, args.metadata)
+    except FileNotFoundError:
+        print(f"ERROR: meta data file ({args.metadata}) does not exist")
+        sys.exit(2)
     config = get_config(args)
 
     # set metadata data structures
@@ -887,15 +894,19 @@ def run_v2(args):
     if args.description:
         set_description(data_json, args.description)
 
-    set_colorings(
-        data_json=data_json,
-        config=get_config_colorings_as_dict(config),
-        command_line_colorings=args.color_by_metadata,
-        metadata_names=metadata_names,
-        node_data_colorings=node_data_names,
-        provided_colors=read_colors(args.colors),
-        node_attrs=node_attrs
-    )
+    try:
+        set_colorings(
+            data_json=data_json,
+            config=get_config_colorings_as_dict(config),
+            command_line_colorings=args.color_by_metadata,
+            metadata_names=metadata_names,
+            node_data_colorings=node_data_names,
+            provided_colors=read_colors(args.colors),
+            node_attrs=node_attrs
+        )
+    except FileNotFoundError as e:
+        print(f"ERROR: required file could not be read: {e}")
+        sys.exit(2)
     set_filters(data_json, config)
 
     # set tree structure

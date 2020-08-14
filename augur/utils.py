@@ -12,10 +12,11 @@ from collections import defaultdict
 from pkg_resources import resource_stream
 from io import TextIOWrapper
 from .__version__ import __version__
-import packaging.version as packaging_version
-from .validate import validate, ValidateError, load_json_schema
 
+from augur.util_support.color_parser import ColorParser
 from augur.util_support.date_disambiguator import DateDisambiguator
+from augur.util_support.metadata_file import MetadataFile
+from augur.util_support.node_data_reader import NodeDataReader
 from augur.util_support.shell_command_runner import ShellCommandRunner
 
 
@@ -70,45 +71,7 @@ def ambiguous_date_to_date_range(uncertain_date, fmt, min_max_year=None):
     return DateDisambiguator(uncertain_date, fmt=fmt, min_max_year=min_max_year).range()
 
 def read_metadata(fname, query=None):
-    if not fname:
-        print("ERROR: read_metadata called without a filename")
-        return {}, []
-    if os.path.isfile(fname):
-        try:
-            metadata = pd.read_csv(fname, sep='\t' if fname[-3:]=='tsv' else ',',
-                                    skipinitialspace=True).fillna('')
-        except pd.errors.ParserError as e:
-            print("Error reading metadata file {}".format(fname))
-            print(e)
-            sys.exit(2)
-        if query:
-            try:
-                metadata.query(query, inplace=True)
-            except Exception as e:
-                # Would like to make this more specific, but Pandas throws multiple different
-                # errors from panda specific to python generic errors.
-                print("ERROR: Invalid query string: '{}'".format(query))
-                print(e)
-                sys.exit(2)
-        meta_dict = {}
-        for ii, val in metadata.iterrows():
-            if hasattr(val, "strain"):
-                if val.strain in meta_dict:
-                    raise ValueError("Duplicate strain '{}'".format(val.strain))
-                meta_dict[val.strain] = val.to_dict()
-            elif hasattr(val, "name"):
-                val = val.rename(val["name"])
-                if val.name in meta_dict:
-                    raise ValueError("Duplicate name '{}'".format(val.name))
-                meta_dict[val.name] = val.to_dict()
-            else:
-                print("ERROR: meta data file needs 'name' or 'strain' column")
-
-        return meta_dict, list(metadata.columns)
-    else:
-        print("ERROR: meta data file ({}) does not exist".format(fname))
-        return {}, []
-
+    return MetadataFile(fname, query).read()
 
 def get_numerical_dates(meta_dict, name_col = None, date_col='date', fmt=None, min_max_year=None):
     if fmt:
@@ -194,79 +157,7 @@ def read_tree(fname, min_terminals=3):
 
 
 def read_node_data(fnames, tree=None):
-    """
-    parses one or more "node-data" JSON files and combines them using custom logic.
-    Will exit with a (hopefully) helpful message if errors are detected.
-
-    For each JSON, we expect the top-level key "nodes" to be a dict.
-    Generated-by fields will not be included in the returned dict of this function.
-    """
-    if isinstance(fnames, str):
-        fnames = [fnames]
-    node_data = {"nodes": {}}
-    for fname in fnames:
-        if os.path.isfile(fname):
-            with open(fname, encoding='utf-8') as jfile:
-                tmp_data = json.load(jfile)
-            if tmp_data.get("annotations"):
-                try:
-                    validate(tmp_data.get("annotations"), load_json_schema("schema-annotations.json"), fname)
-                except ValidateError as err:
-                    print("{} contains an `annotations` block of an invalid JSON format. "
-                        "Was it produced by different version of augur the one you are currently using ({})? "
-                        "Please check the script / program which produced that JSON file.".format(fname, get_augur_version()))
-                    print(err)
-                    sys.exit(2)
-            try:
-                for k,v in tmp_data.items():
-                    if k=="nodes":
-                        if not isinstance(v, dict):
-                            raise AugurException("\"nodes\" key in {} is not a dictionary. Please check the formatting of this JSON!".format(fname))
-                        for n,nv in v.items():
-                            if n in node_data["nodes"]:
-                                node_data["nodes"][n].update(nv)
-                            else:
-                                node_data["nodes"][n] = nv
-                    elif k=="generated_by":
-                        # Note that this key is _not_ part of the dict returned from this fn.
-                        if v.get("program") == "augur" and not is_augur_version_compatable(v.get("version")):
-                            # check that the augur version, if provided, is compatible.
-                            # ignore version checking of non-augur produced JSONs
-                            raise AugurException("Augur version incompatability detected -- the JSON {} was generated by augur version {} which is "
-                                "incompatable with the current augur version ({}). We suggest you rerun the pipeline using the current "
-                                "version of augur.".format(fname, v.get("version"), get_augur_version()))
-                    elif k in node_data:
-                        # Behavior as of 2019-11-07 is to do a top-level merge
-                        # of dictionaries. If the value is not a dictionary, we
-                        # now have a fatal error with a nice message (note that
-                        # before 2019-11-07 this was an unhandled error).
-                        # This should be revisited in the future. TODO.
-                        if isinstance(node_data[k], dict) and isinstance(v, dict):
-                            node_data[k].update(v)
-                        else:
-                            raise AugurException("\"{}\" key found in multiple JSONs. This is not currently handled by augur, "
-                                "unless all values are dictionaries. "
-                                "Please check the source of these JSONs.".format(k))
-                    else:
-                        node_data[k]=v
-            except AugurException as e:
-                print(e)
-                sys.exit(2)
-        else:
-            print("ERROR: node_data JSON file %s not found. Attempting to proceed without it."%fname)
-
-    if tree and os.path.isfile(tree):
-        try:
-            T = Bio.Phylo.read(tree, 'newick')
-        except:
-            print("Failed to read tree from file "+tree, file=sys.stderr)
-        else:
-            tree_node_names = set([l.name for l in T.find_clades()])
-            meta_node_names = set(node_data["nodes"].keys())
-            if tree_node_names!=meta_node_names:
-                print("Names of nodes (including internal nodes) of tree %s don't"
-                    " match node names in the node data files."%tree, file=sys.stderr)
-    return node_data
+    return NodeDataReader(fnames, tree).read()
 
 
 def write_json(data, file_name, indent=(None if os.environ.get("AUGUR_MINIFY_JSON") else 2), include_version=True):
@@ -413,46 +304,7 @@ def read_lat_longs(overrides=None, use_defaults=True):
     return coordinates
 
 def read_colors(overrides=None, use_defaults=True):
-    colors = {}
-    # TODO: make parsing of tsv files more robust while allow for whitespace delimiting for backwards compatibility
-    def add_line(line):
-        if line.startswith('#'):
-            return
-        fields = line.strip().split() if not '\t' in line else line.strip().split('\t')
-        if not fields:
-            return # blank lines
-        if len(fields) != 3:
-            print("WARNING: Color map file contains invalid line. Please make sure not to mix tabs and spaces as delimiters (use only tabs):",line)
-            return
-        trait, trait_value, hex_code = fields[0].lower(), fields[1].lower(), fields[2]
-        if not hex_code.startswith("#") or len(hex_code) != 7:
-            print("WARNING: Color map file contained this invalid hex code: ", hex_code)
-            return
-        # If was already added, delete entirely so order can change to order in user-specified file
-        # (even though dicts shouldn't be relied on to have order)
-        if (trait, trait_value) in colors:
-            del colors[(trait, trait_value)]
-        colors[(trait, trait_value)] = hex_code
-
-
-    if use_defaults:
-        with resource_stream(__package__, "data/colors.tsv") as stream:
-            with TextIOWrapper(stream, "utf-8") as defaults:
-                for line in defaults:
-                    add_line(line)
-
-    if overrides:
-        if os.path.isfile(overrides):
-            with open(overrides, encoding='utf-8') as fh:
-                for line in fh:
-                    add_line(line)
-        else:
-            print("WARNING: Couldn't open color definitions file {}.".format(overrides))
-    color_map = defaultdict(list)
-    for (trait, trait_value), hex_code in colors.items():
-        color_map[trait].append((trait_value, hex_code))
-
-    return color_map
+    return ColorParser(mapping_filename=overrides, use_defaults=use_defaults).mapping
 
 def write_VCF_translation(prot_dict, vcf_file_name, ref_file_name):
     """
@@ -716,24 +568,6 @@ def get_augur_version():
     """
     return __version__
 
-def is_augur_version_compatable(version):
-    """
-    Checks if the provided **version** is the same major version
-    as the currently running version of augur.
-
-    Parameters
-    ----------
-    version : str
-        version to check against the current version
-
-    Returns
-    -------
-    Bool
-
-    """
-    current_version = packaging_version.parse(get_augur_version())
-    this_version = packaging_version.parse(version)
-    return this_version.release[0] == current_version.release[0]
 
 def read_bed_file(bed_file):
     """Read a BED file and return a list of excluded sites.
@@ -816,3 +650,8 @@ def load_mask_sites(mask_file):
         mask_sites = read_mask_file(mask_file)
     print("%d masking sites read from %s" % (len(mask_sites), mask_file))
     return mask_sites
+
+VALID_NUCLEOTIDES = { # http://reverse-complement.com/ambiguity.html
+    "A", "G", "C", "T", "U", "N", "R", "Y", "S", "W", "K", "M", "B", "V", "D", "H", "-",
+    "a", "g", "c", "t", "u", "n", "r", "y", "s", "w", "k", "m", "b", "v", "d", "h", "-"
+}
