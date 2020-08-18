@@ -130,7 +130,8 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
                         and node.up.level < depth:
                     node.clade = node.up.clade + "/" + ",".join(muts)
                     node.level = node.up.level + 1
-                    new_clades[node.clade] = muts
+                    # new_clades[node.clade] = muts
+                    new_clades[node.clade] = node.accumulated_muts
                 elif node.up.clade:
                     node.clade = node.up.clade
                     node.level = node.up.level
