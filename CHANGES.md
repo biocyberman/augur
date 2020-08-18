@@ -2,6 +2,9 @@
 
 ## __NEXT__
 
+
+## 10.0.0 (17 August 2020)
+
 ### Major Changes
 
 * Remove Snakemake as a dependency of the augur Python package [#557][]
@@ -12,7 +15,7 @@
 * utils: `read_metadata` interface improvements
   * raises exceptions when 1) input file is missing or unreadable or 2) required columns (`strain` or `name`) are missing instead of failing silently [#584][]
   * automatically detects delimiter in metadata file instead of assuming delimiter based on filename extension [#587][]
-* utils: `read_node_data` interface improvements [#595][]
+* utils: `read_node_data` interface improvements [#595][], [#605][]
   * exits with a nonzero code when node data node names don't match tree nodes and when the input tree cannot be loaded
   * refactors logic to read node data into separate classes with unit tests
 
@@ -25,6 +28,7 @@
 
 ### Features
 
+* docs: Document support for installation from Bioconda [#604][]
 * filter: Add `--subsample-max-sequences` argument to limit the maximum number of sequences to be included in subsampled output [#593][]
 * mask: Add `--mask-invalid` flag to mask invalid nucleotides from FASTA files [#592][]
 
@@ -39,6 +43,8 @@
 [#599]: https://github.com/nextstrain/augur/pull/599
 [#600]: https://github.com/nextstrain/augur/pull/600
 [#601]: https://github.com/nextstrain/augur/pull/601
+[#604]: https://github.com/nextstrain/augur/pull/604
+[#605]: https://github.com/nextstrain/augur/pull/605
 [e9b3eec]: https://github.com/nextstrain/augur/commit/e9b3eec670b9603874e195cc1ccd4f3c1aeef5dd
 [4c474a9]: https://github.com/nextstrain/augur/commit/4c474a96232e9cc333e3fc4c0971336a090b703c
 
