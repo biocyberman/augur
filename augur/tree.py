@@ -58,7 +58,7 @@ def build_raxml(aln_file, out_file, clean_up=True, nthreads=1, tree_builder_args
     # RAxML_bestTree.4ed91a, RAxML_info.4ed91a, RAxML_parsimonyTree.4ed91a, RAxML_result.4ed91a
     random_string = uuid.uuid4().hex[0:6]
 
-    call = [raxml,"-T",str(nthreads)," -f d -m GTRCAT -c 25 -p 235813 -n %s -s"%(random_string), shquote(aln_file), tree_builder_args, "> RAxML_log.%s"%(random_string)]
+    call = [raxml,"-T",str(nthreads)," -f a -m GTRCAT -c 25 -p 235813 -x 235813 -n %s -s"%(random_string), shquote(aln_file), tree_builder_args, "> RAxML_log.%s"%(random_string)]
     cmd = " ".join(call)
     print("Building a tree via:\n\t" + cmd +
           "\n\tStamatakis, A: RAxML Version 8: A tool for Phylogenetic Analysis and Post-Analysis of Large Phylogenies."
@@ -109,7 +109,7 @@ def build_fasttree(aln_file, out_file, clean_up=True, nthreads=1, tree_builder_a
         "OMP_NUM_THREADS": str(nthreads),
     }
 
-    call = [fasttree, "-nosupport", "-nt", shquote(aln_file), tree_builder_args, "1>", shquote(out_file), "2>", shquote(log_file)]
+    call = [fasttree, "-nt", shquote(aln_file), tree_builder_args, "1>", shquote(out_file), "2>", shquote(log_file)]
     cmd = " ".join(call)
     print("Building a tree via:\n\t" + cmd +
           "\n\tPrice et al: FastTree 2 - Approximately Maximum-Likelihood Trees for Large Alignments." +
@@ -159,7 +159,6 @@ def build_iqtree(aln_file, out_file, substitution_model="GTR", clean_up=True, nt
     #   https://github.com/Cibiv/IQ-TREE/blob/44753aba/utils/tools.cpp#L2926-L2936
     fast_opts = [
         "-ninit", "2",
-        "-n",     "2",
         "-me",    "0.05"
     ]
 
