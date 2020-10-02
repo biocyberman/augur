@@ -159,6 +159,7 @@ def build_iqtree(aln_file, out_file, substitution_model="GTR", clean_up=True, nt
     #   https://github.com/Cibiv/IQ-TREE/blob/44753aba/utils/tools.cpp#L2926-L2936
     fast_opts = [
         "-ninit", "2",
+        "-n", "2",
         "-me",    "0.05"
     ]
 
