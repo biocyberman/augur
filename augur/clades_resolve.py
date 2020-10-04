@@ -75,23 +75,23 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
 
     # attach sequences to all nodes
     for node in tree.find_clades(order='preorder'):
-        node_muts = {construct_mut(a, int(pos+1), d) for pos, (a,d) in
-                            enumerate(zip(ref['nuc'], all_muts[node.name]['sequence']))
-                     if a!=d and a != 'N' and d != 'N' }
+        node_muts = {construct_mut(a, int(pos + 1), d) for pos, (a, d) in
+                     enumerate(zip(ref['nuc'], all_muts[node.name]['sequence']))
+                     if a != d and a != 'N' and d != 'N'}
         direct_mutations[node.name] = node_muts
         if node.up:
             node.sequences = {gene: muts.copy() for gene, muts in node.up.sequences.items()}
             node.accumulated_muts = node.up.accumulated_muts.union(all_muts[node.name]['muts'])
             acc_muts = node.accumulated_muts
             if not acc_muts.issubset(node_muts) and node.is_terminal():
-               print(f'Timetree accumulated mutations do not match direct mutations for {node.name}:\n'
-                     f'Unique for timetree: {acc_muts.difference(node_muts)}\n'
-                     f'Intersection: {acc_muts.intersection(node_muts)}\n'
-                     f'Unique for direct: {node_muts.difference(acc_muts)}\n')
-               nn = node.name
-               if nn == "Hungary/SRC-00817/2020":
+                print(f'Timetree accumulated mutations do not match direct mutations for {node.name}:\n'
+                      f'Unique for timetree: {acc_muts.difference(node_muts)}\n'
+                      f'Intersection: {acc_muts.intersection(node_muts)}\n'
+                      f'Unique for direct: {node_muts.difference(acc_muts)}\n')
+                nn = node.name
+                if nn == "Hungary/SRC-00817/2020":
                     p = [n.name for n in tree.get_path(node)]
-                    tmp = {n: all_muts[n]['muts'] for n in p }
+                    tmp = {n: all_muts[n]['muts'] for n in p}
                     print(f"Pause debug: {','.join(p)}\n")
         for mut in all_muts[node.name]['muts']:
             a, pos, d = mut[0], int(mut[1:-1]) - 1, mut[-1]
