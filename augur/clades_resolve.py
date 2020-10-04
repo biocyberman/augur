@@ -156,6 +156,56 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
     return clade_membership, new_clades, direct_mutations
 
 
+def _find_neighbors(dict_muts, query, max_dist=1):
+    neighbors = set()
+    for key in dict_muts:
+        distance = len(set(dict_muts[query]) ^ set(dict_muts[key]))
+        if distance <= max_dist:
+            neighbors.add(key)
+    return neighbors
+
+
+def find_clusters(dict_muts, max_dist=1, min_support=10):
+    """
+    Implementation following the classic DBSCAN algorithm.
+    Find clusters of sequences that have maximum max_dist away from each other.
+
+    Parameters
+        dict_muts: dict dictionary with keys as strain names, values as mutations of the strain against same reference
+
+    Returns
+        clusters: 2d dict cluster no. as keys;
+    """
+    clusters = {}
+    processed = {}
+    count = 0
+    core_points = {}
+    for tip in dict_muts:
+        if tip in processed: continue
+        neighbors = _find_neighbors(dict_muts, tip, max_dist)
+        if len(neighbors) < min_support:
+            processed[tip] = "noise"
+            continue
+        count += 1 # next cluster label
+        processed[tip] = count
+        seed_set = neighbors.difference(set(tip))
+        clusters[count] = {}
+        clusters[count]['core'] = tip
+        full_set = seed_set.copy()
+        for item in seed_set:
+            if item in processed:
+                if processed[item] == "noise": processed[item] = count  # border point
+                else:
+                    continue  # previously processed border point
+            processed[item] = count  # asign cluster for item
+            neighbors = _find_neighbors(dict_muts, item, max_dist)
+            if len(neighbors) >= min_support:  # density check, (if item is a core point
+                full_set.update(neighbors)
+                clusters[count]['core'] = item
+        clusters[count]['set'] = full_set
+    return clusters, processed
+
+
 def register_arguments(parser):
     parser.add_argument('-t', '--tree', help="prebuilt Newick -- no tree will be built if provided")
     parser.add_argument('-m', '--mutations', nargs='+',
@@ -172,6 +222,7 @@ def register_arguments(parser):
     parser.add_argument('--min-mutation', type=int, default=1,
                         help='Minimum number of mutations compare to the most recent ancestral sequence to form a new clade. Defunct, not using')
     parser.add_argument('--output-node-data', '--ond', type=str, help='name of JSON file to save clade assignments to')
+    parser.add_argument('--output-tip-cluster', type=str, metavar="JSON", help="output name JSON tip clusters")
 
 
 def run(args):
@@ -192,7 +243,12 @@ def run(args):
     clade_designations = read_in_clade_definitions(args.clades)
 
     clade_membership, new_clades, direct_mutations = resolve_clades(clade_designations, all_muts, tree, ref,
-                                                  support=min_support, diff=min_mutation, depth=args.max_depth)
+                                                                    support=min_support, diff=min_mutation,
+                                                                    depth=args.max_depth)
+    # sort direct mutations
+    direct_mutations = {node: sorted(list(direct_mutations[node]), key=lambda x: int(x[1:-1])) for node in direct_mutations}
+    tip_direct_mutations = {k: v for k, v in direct_mutations.items() if not k.startswith("NODE")}
+    clusters,strains2clusters = find_clusters(tip_direct_mutations, max_dist= 1, min_support= min_support)
     if args.new_clades:
         clade_out = open(args.new_clades, 'w')
         for clade, muts in new_clades.items():
@@ -205,27 +261,53 @@ def run(args):
     print("clades written to", out_name, file=sys.stderr)
     clade_assignment = args.clade_assignment if args.clade_assignment else Path(out_name).parent.joinpath(
         "clade_assignment.tsv")
+
+    print("Clustering sequences")
+
+    # clusters = {node: [] for node in tip_direct_mutations}
+
     write_tip_only = True
     with open(clade_assignment, "w") as cah:
-        cah.write("strain\tclade\tmutations\tdirect_mutations\n")
         if write_tip_only:
+            cah.write("strain\tclade\tcluster_core\tcluster_size\tmutations\tdirect_mutations\n")
             for node in tree.get_terminals():
                 if node.name in clade_membership:
                     node_path = tree.get_path(node)
                     muts = []
-                    dmuts = sorted(list(direct_mutations[node.name]), key=lambda x: int(x[1:-1]))
+                    dmuts = direct_mutations[node.name]
                     for n in node_path:
                         muts += all_muts[n.name]['muts']
 
                     muts = sorted(muts, key=lambda x: int(x[1:-1]))
-                    cah.write(f"{node.name}\t{clade_membership[node.name]['clade_membership']}\t{','.join(muts)}\t{','.join(dmuts)}\n")
+                    cluster_name = strains2clusters[node.name]
+                    cluster_core = "undefined"
+                    cluster_size = "unkown"
+                    if cluster_name in clusters:
+                        cluster_core = clusters[cluster_name]['core']
+                        cluster_size = len(clusters[cluster_name]['set'])
+                    membership = clade_membership[node.name]['clade_membership']
+                    cah.write(
+                        f"{node.name}\t{membership}\t{cluster_core}\t{cluster_size}\t{','.join(muts)}\t{','.join(dmuts)}\n")
         else:
+            cah.write("strain\tclade\tmutations\tdirect_mutations\n")
             for node in tree.find_clades(order='preorder'):
                 if node.name in clade_membership:
                     cah.write(
                         f"{node.name}\t{clade_membership[node.name]['clade_membership']}\t{','.join(all_muts[node.name]['muts'])}\n")
     print("clade assignments written to", clade_assignment, file=sys.stderr)
 
+
+    node_data = {}
+    for n in tree.find_clades(order='postorder'):
+        if n.is_terminal():
+            cluster_name = strains2clusters[n.name]
+            cluster_core = "undefined"
+            if cluster_name in clusters:
+                   cluster_core = clusters[cluster_name]['core']
+            node_data[n.name] = {'tip_cluster':cluster_core}
+
+    tip_cluster_out  = args.output_tip_cluster if args.output_tip_cluster else Path(out_name).parent.joinpath("tip_cluster.json")
+    write_json({"nodes":node_data}, tip_cluster_out)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
