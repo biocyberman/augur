@@ -3,6 +3,7 @@ Resolve clades to sub clades from base clades. This is complement and alternativ
 """
 
 import sys
+from datetime import datetime
 from Bio import Phylo
 import pandas as pd
 import numpy as np
@@ -11,6 +12,7 @@ from collections import defaultdict
 from augur.translate import construct_mut
 from augur.utils import get_parent_name_by_child_name_for_tree, read_node_data, write_json, get_json_name
 from augur.clades import is_node_in_clade, read_in_clade_definitions, get_reference_sequence_from_root_node
+from augur.utils import read_metadata, get_numerical_dates
 import argparse
 from pathlib import Path
 
@@ -165,7 +167,7 @@ def _find_neighbors(dict_muts, query, max_dist=1):
     return neighbors
 
 
-def find_clusters(dict_muts, max_dist=1, min_support=10):
+def find_clusters(dict_muts, metadata, max_dist=1, min_support=10):
     """
     Implementation following the classic DBSCAN algorithm.
     Find clusters of sequences that have maximum max_dist away from each other.
@@ -184,25 +186,30 @@ def find_clusters(dict_muts, max_dist=1, min_support=10):
         if tip in processed: continue
         neighbors = _find_neighbors(dict_muts, tip, max_dist)
         if len(neighbors) < min_support:
-            processed[tip] = "noise"
+            processed[tip] = "outlier"
             continue
         count += 1 # next cluster label
         processed[tip] = count
         seed_set = neighbors.difference(set(tip))
         clusters[count] = {}
-        clusters[count]['core'] = tip
+        core_points[count] = [tip]
         full_set = seed_set.copy()
         for item in seed_set:
             if item in processed:
-                if processed[item] == "noise": processed[item] = count  # border point
+                if processed[item] == "outlier": processed[item] = count  # border point
                 else:
                     continue  # previously processed border point
             processed[item] = count  # asign cluster for item
             neighbors = _find_neighbors(dict_muts, item, max_dist)
             if len(neighbors) >= min_support:  # density check, (if item is a core point
                 full_set.update(neighbors)
-                clusters[count]['core'] = item
+                core_points[count].append(item)
         clusters[count]['set'] = full_set
+    # select core point based on oldest date.
+    for cluster in core_points:
+        sort_by_date = sorted(core_points[cluster], key = lambda x: datetime.strptime(metadata[x], "%Y-%m-%d"))
+        clusters[cluster]['core'] = sort_by_date[0]
+        clusters[cluster]['date'] = metadata[sort_by_date[0]]
     return clusters, processed
 
 
@@ -213,6 +220,7 @@ def register_arguments(parser):
     parser.add_argument('-r', '--reference', nargs='+',
                         help='fasta files containing reference and tip nucleotide and/or amino-acid sequences ')
     parser.add_argument('-c', '--clades', type=str, help='TSV file containing clade definitions')
+    parser.add_argument('--metadata', type=str, required= True, metavar="FILE", help='TSV file containing metadata, with at least strain names and dates')
     parser.add_argument('-n', '--new-clades', type=str, help='Write out TSV file containing new clades')
     parser.add_argument('--clade-assignment', '--ca', type=str, help='Write out clade assignment')
     parser.add_argument('--max-depth', type=int, default=3,
@@ -242,13 +250,16 @@ def run(args):
     min_mutation = args.min_mutation
     clade_designations = read_in_clade_definitions(args.clades)
 
+    metadata, _ = read_metadata(args.metadata)
+    strain2date = {strain:metadata[strain]['date'] for strain in metadata}
+
     clade_membership, new_clades, direct_mutations = resolve_clades(clade_designations, all_muts, tree, ref,
                                                                     support=min_support, diff=min_mutation,
                                                                     depth=args.max_depth)
     # sort direct mutations
     direct_mutations = {node: sorted(list(direct_mutations[node]), key=lambda x: int(x[1:-1])) for node in direct_mutations}
     tip_direct_mutations = {k: v for k, v in direct_mutations.items() if not k.startswith("NODE")}
-    clusters,strains2clusters = find_clusters(tip_direct_mutations, max_dist= 1, min_support= min_support)
+    clusters,strains2clusters = find_clusters(tip_direct_mutations, strain2date, max_dist= 1, min_support= min_support)
     if args.new_clades:
         clade_out = open(args.new_clades, 'w')
         for clade, muts in new_clades.items():
@@ -269,7 +280,7 @@ def run(args):
     write_tip_only = True
     with open(clade_assignment, "w") as cah:
         if write_tip_only:
-            cah.write("strain\tclade\tcluster_core\tcluster_size\tmutations\tdirect_mutations\n")
+            cah.write("strain\tclade\tcluster_core\tcluster_size\tcluster_date\tmutations\tdirect_mutations\n")
             for node in tree.get_terminals():
                 if node.name in clade_membership:
                     node_path = tree.get_path(node)
@@ -282,12 +293,14 @@ def run(args):
                     cluster_name = strains2clusters[node.name]
                     cluster_core = "undefined"
                     cluster_size = "unkown"
+                    cluster_date = "unkown"
                     if cluster_name in clusters:
                         cluster_core = clusters[cluster_name]['core']
                         cluster_size = len(clusters[cluster_name]['set'])
+                        cluster_date = clusters[cluster_name]['date']
                     membership = clade_membership[node.name]['clade_membership']
                     cah.write(
-                        f"{node.name}\t{membership}\t{cluster_core}\t{cluster_size}\t{','.join(muts)}\t{','.join(dmuts)}\n")
+                        f"{node.name}\t{membership}\t{cluster_core}\t{cluster_size}\t{cluster_date}\t{','.join(muts)}\t{','.join(dmuts)}\n")
         else:
             cah.write("strain\tclade\tmutations\tdirect_mutations\n")
             for node in tree.find_clades(order='preorder'):
