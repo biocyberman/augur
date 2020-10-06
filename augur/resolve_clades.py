@@ -5,6 +5,8 @@ Resolve clades to sub clades from base clades. This is complement and alternativ
 import sys
 from datetime import datetime
 from Bio import Phylo
+from Bio import SeqIO
+from Bio import AlignIO
 import pandas as pd
 import numpy as np
 from collections import defaultdict
@@ -26,8 +28,49 @@ def get_naive_direct_mutations(tree, all_muts, ref):
         direct_mutations[node.name] = node_muts
     return direct_mutations
 
+def get_muts_with_aln(aln, ref, debug = None):
+    direct_mutations = {}
+    # Compare mutations between those computed by treetime and those computed directly (still use treetime ancestral sequence)
+    for seqname in aln:
+            seq_muts = {construct_mut(a, int(pos+1), d) for pos, (a,d) in
+                                enumerate(zip(ref['nuc'], aln[seqname]))
+                      if a!=d and a != 'N' and d != 'N' }
+            direct_mutations[seqname] = seq_muts
+    return direct_mutations
 
-def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, diff=1, depth=3):
+def compare_mutations(tree, all_muts, direct_mutations):
+    """
+    :param tree: newick tree, needed for walking and accumulating mutations from all_muts
+    :param all_muts: per node mutation dictionary from augur
+    :param direct_mutations: dictionary containing direct mutation from get_muts_with_aln
+    :return: message
+    """
+    for node in tree.get_nonterminals():
+        for c in node:
+            c.up = node
+            c.up.clade = ""
+            c.up.level = 0
+            c.up.accumulated_muts = set()
+    tree.root.up = None
+    tree.root.sequences = {'nuc': {}}
+    if 'aa_muts' in all_muts[tree.root.name]:
+        tree.root.sequences.update({gene: {} for gene in all_muts[tree.root.name]['aa_muts']})
+
+    for node in tree.find_clades(order='preorder'):
+        node_muts = {}
+        if node.is_terminal():
+            node_muts = direct_mutations[node.name]
+        if node.up:
+            node.sequences = {gene: muts.copy() for gene, muts in node.up.sequences.items()}
+            node.accumulated_muts = node.up.accumulated_muts.union(all_muts[node.name]['muts'])
+            acc_muts = node.accumulated_muts
+            if not acc_muts.issubset(node_muts) and node.is_terminal():
+                print(f'Timetree accumulated mutations do not match direct mutations for {node.name}:\n'
+                      f'Unique for timetree: {acc_muts.difference(node_muts)}\n'
+                      f'Intersection: {acc_muts.intersection(node_muts)}\n'
+                      f'Unique for direct: {node_muts.difference(acc_muts)}\n')
+
+def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, diff=1, depth=3, debug = None):
     '''
 
     Ensures all nodes have an entry (or auspice doesn't display nicely), tests each node
@@ -84,17 +127,6 @@ def resolve_clades(clade_designations, all_muts, tree, ref=None, support=10, dif
         if node.up:
             node.sequences = {gene: muts.copy() for gene, muts in node.up.sequences.items()}
             node.accumulated_muts = node.up.accumulated_muts.union(all_muts[node.name]['muts'])
-            acc_muts = node.accumulated_muts
-            if not acc_muts.issubset(node_muts) and node.is_terminal():
-                print(f'Timetree accumulated mutations do not match direct mutations for {node.name}:\n'
-                      f'Unique for timetree: {acc_muts.difference(node_muts)}\n'
-                      f'Intersection: {acc_muts.intersection(node_muts)}\n'
-                      f'Unique for direct: {node_muts.difference(acc_muts)}\n')
-                nn = node.name
-                if nn == "Hungary/SRC-00817/2020":
-                    p = [n.name for n in tree.get_path(node)]
-                    tmp = {n: all_muts[n]['muts'] for n in p}
-                    print(f"Pause debug: {','.join(p)}\n")
         for mut in all_muts[node.name]['muts']:
             a, pos, d = mut[0], int(mut[1:-1]) - 1, mut[-1]
             node.sequences['nuc'][pos] = d
@@ -217,8 +249,10 @@ def register_arguments(parser):
     parser.add_argument('-t', '--tree', help="prebuilt Newick -- no tree will be built if provided")
     parser.add_argument('-m', '--mutations', nargs='+',
                         help='JSON(s) containing ancestral and tip nucleotide and/or amino-acid mutations ')
-    parser.add_argument('-r', '--reference', nargs='+',
-                        help='fasta files containing reference and tip nucleotide and/or amino-acid sequences ')
+    parser.add_argument('-r', '--reference',
+                        help='reference sequence in genbank format which was used for alignment')
+
+    parser.add_argument('-a', '--alignment', help="alignment in fasta")
     parser.add_argument('-c', '--clades', type=str, help='TSV file containing clade definitions')
     parser.add_argument('--metadata', type=str, required= True, metavar="FILE", help='TSV file containing metadata, with at least strain names and dates')
     parser.add_argument('-n', '--new-clades', type=str, help='Write out TSV file containing new clades')
@@ -249,13 +283,23 @@ def run(args):
     min_support = args.min_support
     min_mutation = args.min_mutation
     clade_designations = read_in_clade_definitions(args.clades)
+    refseq = {}
+    refseq['nuc'] = list(SeqIO.read(args.reference, 'genbank').seq)
+    # assert(refseq['nuc'] == "".join(ref['nuc'])) # Suppose to fail
+    alignment = AlignIO.read(open(args.alignment), "fasta")
+    aln_seq = {}
+    for s in alignment:
+        aln_seq[s.id] = s.seq
+
 
     metadata, _ = read_metadata(args.metadata)
     strain2date = {strain:metadata[strain]['date'] for strain in metadata}
 
-    clade_membership, new_clades, direct_mutations = resolve_clades(clade_designations, all_muts, tree, ref,
+    clade_membership, new_clades, _ = resolve_clades(clade_designations, all_muts, tree, ref,
                                                                     support=min_support, diff=min_mutation,
                                                                     depth=args.max_depth)
+    direct_mutations = get_muts_with_aln(aln_seq, refseq)
+    compare_mutations(tree, all_muts, direct_mutations)
     # sort direct mutations
     direct_mutations = {node: sorted(list(direct_mutations[node]), key=lambda x: int(x[1:-1])) for node in direct_mutations}
     tip_direct_mutations = {k: v for k, v in direct_mutations.items() if not k.startswith("NODE")}
