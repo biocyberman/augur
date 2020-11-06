@@ -337,8 +337,7 @@ def run(args):
     # compare_mutations(tree, all_muts, direct_mutations)
     # sort direct mutations
     direct_mutations = {node: sorted(list(direct_mutations[node]), key=lambda x: int(x[1:-1])) for node in direct_mutations}
-    tip_direct_mutations = {k: v for k, v in direct_mutations.items() if not k.startswith("NODE")}
-    clusters,strains2clusters = find_clusters(tip_direct_mutations, strain2date, max_dist= 1, min_support= min_support)
+    clusters,strains2clusters = find_clusters(direct_mutations, strain2date, max_dist= 1, min_support= min_support)
     if args.new_clades:
         clade_out = open(args.new_clades, 'w')
         for clade, muts in new_clades.items():
@@ -356,49 +355,33 @@ def run(args):
 
     # clusters = {node: [] for node in tip_direct_mutations}
 
-    write_tip_only = True
     with open(clade_assignment, "w") as cah:
-        if write_tip_only:
-            cah.write("strain\tclade\tcluster_core\tcluster_size\tcluster_date\tmutations\tdirect_mutations\tdirect_aa_mutations\n")
-            for node in tree.get_terminals():
-                if node.name in clade_membership and node.name != refid:
-                    node_path = tree.get_path(node)
-                    dmuts = direct_mutations[node.name]
-                    muts = []
-                    for n in node_path:
-                        muts += all_muts[n.name]['muts']
+        cah.write("strain\tclade\tcluster_core\tcluster_size\tcluster_date\tdirect_mutations\tdirect_aa_mutations\n")
+        for strain in seq_ids:
+            dmuts = direct_mutations[strain]
+            aa_dmuts = aa_muts[strain]['aa']
 
-                    muts = sorted(muts, key=lambda x: int(x[1:-1]))
+            # TODO: Check if the following segment can be more idiomatic
+            ga_muts = {}
+            for v in aa_dmuts.values():
+                mutstr = f"{v['ref']}{v['p']}{v['alt']}"
+                if v['g'] in ga_muts:
+                    ga_muts[v['g']].append(mutstr)
+                else:
+                    ga_muts[v['g']] = [mutstr]
+            amutstr = [k + ":" + ','.join(v) for k, v in ga_muts.items()]
+            amutstr = ';'.join(amutstr)
 
-                    aa_dmuts = aa_muts[node.name]['aa']
-
-                    # TODO: Check if the following segment can be more idiomatic
-                    ga_muts = {}
-                    for v in aa_dmuts.values():
-                        mutstr = f"{v['ref']}{v['p']}{v['alt']}"
-                        if v['g'] in ga_muts:
-                            ga_muts[v['g']].append(mutstr)
-                        else:
-                            ga_muts[v['g']] = [mutstr]
-                    amutstr = [k + ":" + ','.join(v) for k, v in ga_muts.items()]
-                    amutstr = ';'.join(amutstr)
-
-                    cluster_name = strains2clusters[node.name]
-                    cluster_core = "undefined"
-                    cluster_size = "unkown"
-                    cluster_date = "unkown"
-                    if cluster_name in clusters:
-                        cluster_core = clusters[cluster_name]['core']
-                        cluster_size = len(clusters[cluster_name]['set'])
-                        cluster_date = clusters[cluster_name]['date']
-                    membership = clade_membership[node.name]['clade_membership']
-                    cah.write( f"{node.name}\t{membership}\t{cluster_core}\t{cluster_size}\t{cluster_date}\t{','.join(muts)}\t{','.join(dmuts)}\t{amutstr}\n")
-        else:
-            cah.write("strain\tclade\tmutations\tdirect_mutations\n")
-            for node in tree.find_clades(order='preorder'):
-                if node.name in clade_membership:
-                    cah.write(
-                        f"{node.name}\t{clade_membership[node.name]['clade_membership']}\t{','.join(all_muts[node.name]['muts'])}\n")
+            cluster_name = strains2clusters[strain]
+            cluster_core = "undefined"
+            cluster_size = "unkown"
+            cluster_date = "unkown"
+            if cluster_name in clusters:
+                cluster_core = clusters[cluster_name]['core']
+                cluster_size = len(clusters[cluster_name]['set'])
+                cluster_date = clusters[cluster_name]['date']
+            membership = clade_membership[strain]['clade_membership']
+            cah.write( f"{strain}\t{membership}\t{cluster_core}\t{cluster_size}\t{cluster_date}\t{','.join(dmuts)}\t{amutstr}\n")
     print("clade assignments written to", clade_assignment, file=sys.stderr)
 
 
