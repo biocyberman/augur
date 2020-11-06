@@ -380,7 +380,7 @@ def run(args):
                 cluster_core = clusters[cluster_name]['core']
                 cluster_size = len(clusters[cluster_name]['set'])
                 cluster_date = clusters[cluster_name]['date']
-            membership = clade_membership[strain]['clade_membership']
+            membership = clade_membership[strain]['clade_membership'] if strain in clade_membership else ""
             cah.write( f"{strain}\t{membership}\t{cluster_core}\t{cluster_size}\t{cluster_date}\t{','.join(dmuts)}\t{amutstr}\n")
     print("clade assignments written to", clade_assignment, file=sys.stderr)
 
