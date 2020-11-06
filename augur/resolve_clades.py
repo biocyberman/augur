@@ -15,7 +15,7 @@ from augur.utils import read_metadata
 import argparse
 from pathlib import Path
 
-from augur.extract_SNPs import generate_SNPs_table, make_annotation_dict, translate_feature_keep_seqs
+from augur.extract_snps import generate_SNPs_table, make_annotation_dict, translate_feature_keep_seqs
 
 
 def get_naive_direct_mutations(tree, all_muts, ref):

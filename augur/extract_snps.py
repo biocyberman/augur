@@ -1,5 +1,5 @@
 """
-Translate gene regions from nucleotides to amino acids.
+Extract direct mutations from alignment.
 """
 import argparse
 # from efficient_apriori import apriori
@@ -400,11 +400,7 @@ def run(args):
     print(f"Output are: {outdir}/tip_all_mutations.tsv")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        prog="extract_SNPs.py",
-        description="Report direct mutations based on alignments")
-
+def register_arguments(parser):
     parser.add_argument('--refid', help="Reference sequence ID in the alignment file in case there is a mismatch between reference sequence and alignment")
     parser.add_argument('-r', '--reference', required=True,
                         help='GenBank file containing the annotation')
@@ -412,9 +408,9 @@ def main():
     parser.add_argument('-o', '--outdir', help="Output directory for saving files", type=str)
     parser.add_argument('--genes', nargs='+', help="genes to translate (list or file containing list)")
 
-    return run(parser.parse_args())
-
-
-# Run when called as `python -m augur`, here for good measure.
 if __name__ == "__main__":
-    exit(main())
+    parser = argparse.ArgumentParser(
+        prog="extract_snps",
+        description="Extract direct mutations based on alignments")
+    args = register_arguments(parser)
+    exit(run(parser.parse_args()))

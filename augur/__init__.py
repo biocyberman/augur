@@ -26,6 +26,7 @@ command_strings = [
     "reconstruct_sequences",
     "clades",
     "resolve_clades",
+    "extract_snps",
     "traits",
     "sequence_traits",
     "lbi",
