@@ -6,19 +6,16 @@ import sys
 from datetime import datetime
 from Bio import Phylo
 from Bio import SeqIO
-from Bio import AlignIO
-import pandas as pd
 import numpy as np
-from collections import defaultdict
 
-from augur.translate import construct_mut, translate_feature
-from augur.utils import get_parent_name_by_child_name_for_tree, read_node_data, write_json, get_json_name, load_features
+from augur.translate import construct_mut
+from augur.utils import read_node_data, write_json, get_json_name, load_features
 from augur.clades import is_node_in_clade, read_in_clade_definitions, get_reference_sequence_from_root_node
-from augur.utils import read_metadata, get_numerical_dates
+from augur.utils import read_metadata
 import argparse
 from pathlib import Path
 
-from scripts.extract_SNPs import generate_SNPs_table, make_annotation_dict, translate_feature_keep_seqs
+from augur.extract_SNPs import generate_SNPs_table, make_annotation_dict, translate_feature_keep_seqs
 
 
 def get_naive_direct_mutations(tree, all_muts, ref):
