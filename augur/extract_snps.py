@@ -397,7 +397,7 @@ def run(args):
     fwae.close()
     # fwne.close()
     print("Done!")
-    print(f"Output are: {outdir}/tip_all_mutations.tsv")
+    print(f"Output are: {outdir}/all_mutations.tsv")
 
 
 def register_arguments(parser):
