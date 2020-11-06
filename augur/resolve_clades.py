@@ -11,12 +11,14 @@ import pandas as pd
 import numpy as np
 from collections import defaultdict
 
-from augur.translate import construct_mut
-from augur.utils import get_parent_name_by_child_name_for_tree, read_node_data, write_json, get_json_name
+from augur.translate import construct_mut, translate_feature
+from augur.utils import get_parent_name_by_child_name_for_tree, read_node_data, write_json, get_json_name, load_features
 from augur.clades import is_node_in_clade, read_in_clade_definitions, get_reference_sequence_from_root_node
 from augur.utils import read_metadata, get_numerical_dates
 import argparse
 from pathlib import Path
+
+from scripts.extract_SNPs import generate_SNPs_table, make_annotation_dict, translate_feature_keep_seqs
 
 
 def get_naive_direct_mutations(tree, all_muts, ref):
@@ -265,6 +267,7 @@ def register_arguments(parser):
                         help='Minimum number of mutations compare to the most recent ancestral sequence to form a new clade. Defunct, not using')
     parser.add_argument('--output-node-data', '--ond', type=str, help='name of JSON file to save clade assignments to')
     parser.add_argument('--output-tip-cluster', type=str, metavar="JSON", help="output name JSON tip clusters")
+    parser.add_argument('--refid', help="Reference sequence ID in the alignment file in case there is a mismatch between reference sequence and alignment")
 
 
 def run(args):
@@ -278,28 +281,63 @@ def run(args):
 
     # extract reference sequences from the root node entry in the mutation json
     # if this doesn't exist, it will complain but not error.
-    ref = get_reference_sequence_from_root_node(all_muts, tree.root.name)
+    inferred_root = get_reference_sequence_from_root_node(all_muts, tree.root.name)
 
     min_support = args.min_support
     min_mutation = args.min_mutation
     clade_designations = read_in_clade_definitions(args.clades)
     refseq = {}
     refseq['nuc'] = list(SeqIO.read(args.reference, 'genbank').seq)
-    # assert(refseq['nuc'] == "".join(ref['nuc'])) # Suppose to fail
+    # assert(refseq['nuc'] == "".join(inferred_root['nuc'])) # Suppose to fail
+
+    from Bio import AlignIO
     alignment = AlignIO.read(open(args.alignment), "fasta")
     aln_seq = {}
     for s in alignment:
         aln_seq[s.id] = s.seq
 
+        ## check file format and read in sequences
+    from Bio import AlignIO
+    alignment = AlignIO.read(open(args.alignment), "fasta")
+    seq_dict = {}
+    refid = SeqIO.read(args.reference, 'genbank').id
+    if args.refid:
+        refid = args.refid
+
+    for r in alignment:
+        if r.id == refid:
+            seq_dict['refseq'] = r.seq
+        else:
+            seq_dict[r.id] = r.seq
+
+    ## load features; only requested features if genes given
+    features = load_features(args.reference, None)
+    print("Read in {} features from reference sequence file".format(len(features)))
+    if features is None:
+        print("ERROR: could not read features of reference sequence file")
+        return 1
+
+    ### translate every feature - but not 'nuc'!
+    translations = {}
+    for fname, feat in features.items():
+        if feat.type != 'source':
+            translations[fname] = translate_feature_keep_seqs(seq_dict, feat)
+
+    annotations = make_annotation_dict(features, args.reference)
+
+    ## determine amino acid mutations for each sequence
+    seq_ids = [k for k in seq_dict.keys() if k != 'refseq']
+    aa_muts = generate_SNPs_table(seq_ids, translations, annotations)
+
 
     metadata, _ = read_metadata(args.metadata)
     strain2date = {strain:metadata[strain]['date'] for strain in metadata}
 
-    clade_membership, new_clades, _ = resolve_clades(clade_designations, all_muts, tree, ref,
+    clade_membership, new_clades, _ = resolve_clades(clade_designations, all_muts, tree, inferred_root,
                                                                     support=min_support, diff=min_mutation,
                                                                     depth=args.max_depth)
     direct_mutations = get_muts_with_aln(aln_seq, refseq)
-    compare_mutations(tree, all_muts, direct_mutations)
+    # compare_mutations(tree, all_muts, direct_mutations)
     # sort direct mutations
     direct_mutations = {node: sorted(list(direct_mutations[node]), key=lambda x: int(x[1:-1])) for node in direct_mutations}
     tip_direct_mutations = {k: v for k, v in direct_mutations.items() if not k.startswith("NODE")}
@@ -324,16 +362,30 @@ def run(args):
     write_tip_only = True
     with open(clade_assignment, "w") as cah:
         if write_tip_only:
-            cah.write("strain\tclade\tcluster_core\tcluster_size\tcluster_date\tmutations\tdirect_mutations\n")
+            cah.write("strain\tclade\tcluster_core\tcluster_size\tcluster_date\tmutations\tdirect_mutations\tdirect_aa_mutations\n")
             for node in tree.get_terminals():
-                if node.name in clade_membership:
+                if node.name in clade_membership and node.name != refid:
                     node_path = tree.get_path(node)
-                    muts = []
                     dmuts = direct_mutations[node.name]
+                    muts = []
                     for n in node_path:
                         muts += all_muts[n.name]['muts']
 
                     muts = sorted(muts, key=lambda x: int(x[1:-1]))
+
+                    aa_dmuts = aa_muts[node.name]['aa']
+
+                    # TODO: Check if the following segment can be more idiomatic
+                    ga_muts = {}
+                    for v in aa_dmuts.values():
+                        mutstr = f"{v['ref']}{v['p']}{v['alt']}"
+                        if v['g'] in ga_muts:
+                            ga_muts[v['g']].append(mutstr)
+                        else:
+                            ga_muts[v['g']] = [mutstr]
+                    amutstr = [k + ":" + ','.join(v) for k, v in ga_muts.items()]
+                    amutstr = ';'.join(amutstr)
+
                     cluster_name = strains2clusters[node.name]
                     cluster_core = "undefined"
                     cluster_size = "unkown"
@@ -343,8 +395,7 @@ def run(args):
                         cluster_size = len(clusters[cluster_name]['set'])
                         cluster_date = clusters[cluster_name]['date']
                     membership = clade_membership[node.name]['clade_membership']
-                    cah.write(
-                        f"{node.name}\t{membership}\t{cluster_core}\t{cluster_size}\t{cluster_date}\t{','.join(muts)}\t{','.join(dmuts)}\n")
+                    cah.write( f"{node.name}\t{membership}\t{cluster_core}\t{cluster_size}\t{cluster_date}\t{','.join(muts)}\t{','.join(dmuts)}\t{amutstr}\n")
         else:
             cah.write("strain\tclade\tmutations\tdirect_mutations\n")
             for node in tree.find_clades(order='preorder'):
