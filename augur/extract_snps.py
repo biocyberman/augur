@@ -330,6 +330,12 @@ def run(args):
         else:
             seq_dict[r.id] = r.seq
 
+    variants = {}
+    if args.variant_list: 
+        with open(args.variant_list) as fh:
+            tmp = [line.strip().split()[0] for line in fh]
+            variants = {e[:-1]:e for e in tmp}
+
     ## load features; only requested features if genes given
     features = load_features(args.reference, genes)
     print("Read in {} features from reference sequence file".format(len(features)))
@@ -396,6 +402,27 @@ def run(args):
     pd.DataFrame(fwn_df).to_csv(fwn, sep="\t", index=False, header=False, chunksize=5000)
     pd.DataFrame(fwae_df).to_csv(fwae, sep="\t", index=False, header=False, chunksize=5000)
     # fwne.close()
+    if len(variants):
+        print("Writing variant status for hallmark variants")
+        hallmark_status = {}
+        fwh = outdir + "/hallmark_variants_status.tsv"
+        fwh_df = [["strain", "hallmark_variant", "status"]]
+        for seqid in seq_ids:
+            amuts = aa_muts[seqid]['aa']
+            # capture variants that exists in variants list
+            tmp = {pos:amuts[pos] for pos in amuts if  f'{amuts[pos]["g"]}.{amuts[pos]["ref"]}{amuts[pos]["p"]}' in variants} 
+            for k, v in tmp.items():
+                gene = v['g']
+                a_ref = v['ref']
+                a_alt = v['alt']
+                a_pos = v['p']
+                a_mut = f'{gene}.{a_ref}{a_pos}{a_alt}'
+                s = f'{gene}.{a_ref}{a_pos}'
+                status = 'contain' if a_mut  == variants[s] else a_alt
+                fwh_df.append([seqid, variants[s], status])
+        pd.DataFrame(fwh_df).to_csv(fwh, sep="\t", index=False, header=False, chunksize=5000)
+        print(f"Hallmark variant output: {fwh}")
+
     print("Done!")
     print(f"Output are:\n{fwn}\n{fwa}\n{fwae}")
 
@@ -405,6 +432,7 @@ def register_arguments(parser):
     parser.add_argument('-r', '--reference', required=True,
                         help='GenBank file containing the annotation')
     parser.add_argument('-a', '--alignment', help="alignment in fasta format")
+    parser.add_argument('-l', '--variant-list', help="List of variants to be checked for their status")
     parser.add_argument('-o', '--outdir', help="Output directory for saving files", type=str)
     parser.add_argument('--genes', nargs='+', help="genes to translate (list or file containing list)")
 
