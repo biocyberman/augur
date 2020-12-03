@@ -5,11 +5,12 @@ import argparse
 # from efficient_apriori import apriori
 import os, sys
 import numpy as np
+import pandas as pd
 from pandas.core.common import flatten
 from Bio import SeqIO, SeqFeature, Seq, SeqRecord, Phylo
 from augur.utils import read_node_data, load_features, write_json, write_VCF_translation, get_json_name
 from sys import argv, exit
-
+# from joblib import Parallel, delayed
 
 class MissingNodeError(Exception):
     pass
@@ -184,11 +185,11 @@ def _find_snps(rseq, nseq, annotations, fname, type = 'dna'):
     for idx, (a, d) in enumerate(zip(rseq, nseq)):
         # mut = d if a != d else '-'  # Naive check for mutation
         if a != d :
-            if type == 'prot' and d != 'X': # give coordinate to the first base of the codon
+            if type == 'prot': # give coordinate to the first base of the codon
                 pos = aa_to_nt_pos(annotations, fname, idx)
                 p = idx + 1
                 snps[pos] = {"g": fname, "p": p, "ref": a, "alt": d}
-            if type == 'nuc' and a != 'N' and d != 'N': # give coordinate also to the first base of the codon
+            if type == 'nuc' and a != 'N': # give coordinate also to the first base of the codon
                 p, pos = _nt_mut_to_codon_coord(annotations, fname, idx)
                 snps[pos] = {"g": fname, "p": p, "ref": a, "alt": d}
     return snps
@@ -349,20 +350,19 @@ def run(args):
     aa_muts = generate_SNPs_table(seq_ids, translations, annotations)
 
     print("Writing SNP data ...")
-    fwa = open(outdir + "/aa_snps.tsv", "w")
-    fwn = open(outdir + "/all_mutations.tsv", "w")
-    fwa.write(f'strain\tdirect_aa_mutations\n')
-    fwn.write(f'Strain\tPosition\tNuRef\tNuAlt\tNuMut\tGene\tAaPos\tAaRef\tAaAlt\tAaMut\n')
-
-    fwae = open(outdir + "/aa_snps_ex.tsv", "w")
+    fwa = outdir + "/aa_snps.tsv"
+    fwn = outdir + "/all_mutations.tsv"
+    fwae = outdir + "/aa_snps_ex.tsv"
+    fwa_df = [['strain','direct_aa_mutations']]
+    fwn_df = [['Strain','Position','NuRef','NuAlt','NuMut','Gene','AaPos','AaRef','AaAlt','AaMut']]
+    fwae_df = [['Node','Mutations']]
     # fwne = open(outdir + "/tip_nt_snps_ex.tsv", "w")
-    fwae.write(f'Node\tMutations\n')
     # fwne.write(f'Node\tMutations\n')
-
     for seqid in seq_ids:
         amuts = aa_muts[seqid]['aa']
+        amuts = { pos:amuts[pos] for pos in amuts if  amuts[pos]["alt"] != "X"}
         tmp = [f'{amuts[pos]["g"]}.{amuts[pos]["ref"]}{amuts[pos]["p"]}{amuts[pos]["alt"]}' for pos in amuts]
-        fwa.write(f'{seqid}\t{",".join(tmp)}\n')
+        fwa_df.append([seqid, ",".join(tmp)])
         nmuts = aa_muts[seqid]['nt'] # mutations within gene features
         gmuts = {}
         for pos, (a, d) in enumerate(zip(seq_dict['refseq'], seq_dict[seqid])):
@@ -380,10 +380,10 @@ def run(args):
                 a_alt = amuts[pos]['alt']
                 a_pos = amuts[pos]['p']
                 a_mut = f'{gene}.{a_ref}{amuts[pos]["p"]}{a_alt}'
-                fwae.write(f'{seqid}\t{a_mut}\n')
+                fwae_df.append([seqid, a_mut])
             else:
                a_ref = a_alt = a_pos = a_mut = '='
-            fwn.write(f'{seqid}\t{mut["p"]}\t{n_ref}\t{n_alt}\t{n_mut}\t{gene}\t{a_pos}\t{a_ref}\t{a_alt}\t{a_mut}\n')
+            fwn_df.append([seqid, mut["p"], n_ref, n_alt, n_mut, gene, a_pos, a_ref, a_alt, a_mut])
         for pos, mut in gmuts.items():
             gene = gmuts[pos]['g']
             a_ref = a_alt = a_pos = a_mut = 'unk'
@@ -391,13 +391,13 @@ def run(args):
             n_alt = mut['alt']
             n_mut =f'{mut["ref"]}{mut["p"]}{mut["alt"]}'
             # fwne.write(f'{seqid}\t{n_mut}\n')
-            fwn.write(f'{seqid}\t{mut["p"]}\t{n_ref}\t{n_alt}\t{n_mut}\t{gene}\t{a_pos}\t{a_ref}\t{a_alt}\t{a_mut}\n')
-    fwa.close()
-    fwn.close()
-    fwae.close()
+            fwn_df.append([seqid, mut["p"], n_ref, n_alt, n_mut, gene, a_pos, a_ref, a_alt, a_mut])
+    pd.DataFrame(fwa_df).to_csv(fwa, sep="\t", index=False, header=False, chunksize=5000)
+    pd.DataFrame(fwn_df).to_csv(fwn, sep="\t", index=False, header=False, chunksize=5000)
+    pd.DataFrame(fwae_df).to_csv(fwae, sep="\t", index=False, header=False, chunksize=5000)
     # fwne.close()
     print("Done!")
-    print(f"Output are: {outdir}/all_mutations.tsv")
+    print(f"Output are:\n{fwn}\n{fwa}\n{fwae}")
 
 
 def register_arguments(parser):
